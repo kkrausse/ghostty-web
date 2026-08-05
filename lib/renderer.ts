@@ -158,7 +158,10 @@ export class CanvasRenderer {
 
   constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d', { alpha: true });
+    // desynchronized lets supporting platforms present canvas updates without
+    // waiting on the compositor queue (saves up to a frame of latency); it is
+    // a hint and silently ignored where unsupported.
+    const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
     if (!ctx) {
       throw new Error('Failed to get 2D rendering context');
     }
