@@ -497,9 +497,10 @@ export class CanvasRenderer {
     // We also include adjacent rows (above and below) for each dirty row to handle
     // glyph overflow - tall glyphs like Devanagari vowel signs can extend into
     // adjacent rows' visual space.
-    // A full repaint leaves the shadow unknown: skipping is only safe against
-    // a hash of what is actually on the canvas.
-    if (forceAll) {
+    // While scrolled the canvas shows scrollback, not the live screen the
+    // shadow indexes — a stale shadow would wrongly skip repaints after
+    // scrolling back to the bottom.
+    if (viewportY > 0) {
       this.rowShadow.length = 0;
     }
 
@@ -508,11 +509,13 @@ export class CanvasRenderer {
       // Dirty means the app touched the row, not that its pixels changed —
       // erase-and-rewrite-identical is the common case under key repeat
       // (Emacs redisplay, Ink rerenders). Hash the row and skip true no-ops.
-      let contentChanged = false;
-      if (viewportY === 0 && !forceAll && buffer.isRowDirty(y)) {
+      // Under forceAll the row paints regardless, but the hash is still
+      // stored so the pass AFTER a full repaint can skip unchanged rows.
+      let contentChanged = forceAll;
+      if (viewportY === 0 && (forceAll || buffer.isRowDirty(y))) {
         if (cells) {
           const h = this.hashRow(cells, y * dims.cols, dims.cols);
-          contentChanged = h !== this.rowShadow[y];
+          if (!forceAll) contentChanged = h !== this.rowShadow[y];
           this.rowShadow[y] = h;
         } else {
           contentChanged = true;
