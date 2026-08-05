@@ -141,6 +141,12 @@ export class CanvasRenderer {
   // Last scrollbar opacity painted; a fade in progress must defeat the idle skip.
   private lastScrollbarOpacity: number = -1;
 
+  // What resize() last configured the canvas for (see needsResize in render()).
+  private lastResizeCols: number = -1;
+  private lastResizeRows: number = -1;
+  private lastResizeCellW: number = -1;
+  private lastResizeCellH: number = -1;
+
   // Selection manager (for rendering selection)
   private selectionManager?: SelectionManager;
   // Cached selection coordinates for current render pass (viewport-relative)
@@ -267,6 +273,10 @@ export class CanvasRenderer {
     // Canvas contents are gone after a resize; the shadow no longer describes
     // what is painted. (Font changes route through here too.)
     this.rowShadow.length = 0;
+    this.lastResizeCols = cols;
+    this.lastResizeRows = rows;
+    this.lastResizeCellW = this.metrics.width;
+    this.lastResizeCellH = this.metrics.height;
 
     const cssWidth = cols * this.metrics.width;
     const cssHeight = rows * this.metrics.height;
@@ -319,10 +329,17 @@ export class CanvasRenderer {
       forceAll = true;
     }
 
-    // Resize canvas if dimensions changed
+    // Resize canvas if dimensions changed. Compare against what resize() was
+    // last called with, NOT recomputed pixel dimensions: canvas.width is an
+    // integer while cols*cellWidth*devicePixelRatio is fractional whenever
+    // devicePixelRatio is (scaled displays, browser zoom) — that comparison
+    // never converges and forced a canvas reallocation + full repaint on
+    // EVERY render pass (~90ms/frame measured at dpr 1.33).
     const needsResize =
-      this.canvas.width !== dims.cols * this.metrics.width * this.devicePixelRatio ||
-      this.canvas.height !== dims.rows * this.metrics.height * this.devicePixelRatio;
+      this.lastResizeCols !== dims.cols ||
+      this.lastResizeRows !== dims.rows ||
+      this.lastResizeCellW !== this.metrics.width ||
+      this.lastResizeCellH !== this.metrics.height;
 
     if (needsResize) {
       this.resize(dims.cols, dims.rows);
