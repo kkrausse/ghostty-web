@@ -25,6 +25,16 @@ export interface IRenderable {
   needsFullRedraw?(): boolean;
   clearDirty(): void;
   /**
+   * Pooled full-viewport cell array (rows*cols, row-major), refreshed on call.
+   * When present, the renderer fetches it ONCE per render pass instead of
+   * calling getLine() per row — getLine() re-extracts the entire viewport
+   * from WASM on every call, which made per-row fetching O(rows * cells).
+   * The array is a reused pool: valid until the next getViewport()/resize.
+   */
+  getViewport?(): GhosttyCell[];
+  /** True when terminal state changed since the last clearDirty(). */
+  isDirty?(): boolean;
+  /**
    * Get the full grapheme string for a cell at (row, col).
    * For cells with grapheme_len > 0, this returns all codepoints combined.
    * For simple cells, returns the single character.
@@ -113,6 +123,14 @@ export class CanvasRenderer {
 
   // Current buffer being rendered (for grapheme lookups)
   private currentBuffer: IRenderable | null = null;
+
+  // Pooled viewport cells for the current render pass (see IRenderable.getViewport).
+  // Valid only within one render() call — the pool is rewritten by the next fetch.
+  private currentCells: GhosttyCell[] | null = null;
+  private currentCols: number = 0;
+
+  // Last scrollbar opacity painted; a fade in progress must defeat the idle skip.
+  private lastScrollbarOpacity: number = -1;
 
   // Selection manager (for rendering selection)
   private selectionManager?: SelectionManager;
@@ -301,28 +319,17 @@ export class CanvasRenderer {
       this.lastViewportY = viewportY;
     }
 
-    // Check if cursor position changed or if blinking (need to redraw cursor line)
+    const anyDirty = buffer.isDirty ? buffer.isDirty() : true;
+
+    // While scrolled, new output shifts rows under the viewport (screen rows
+    // migrate into scrollback), so any dirt means a full repaint. Without
+    // dirt, a scrolled view is static and needs nothing.
+    if (viewportY > 0 && anyDirty) {
+      forceAll = true;
+    }
+
     const cursorMoved =
       cursor.x !== this.lastCursorPosition.x || cursor.y !== this.lastCursorPosition.y;
-    if (cursorMoved || this.cursorBlink) {
-      // Mark cursor lines as needing redraw
-      if (!forceAll && !buffer.isRowDirty(cursor.y)) {
-        // Need to redraw cursor line
-        const line = buffer.getLine(cursor.y);
-        if (line) {
-          this.renderLine(line, cursor.y, dims.cols);
-        }
-      }
-      if (cursorMoved && this.lastCursorPosition.y !== cursor.y) {
-        // Also redraw old cursor line if cursor moved to different line
-        if (!forceAll && !buffer.isRowDirty(this.lastCursorPosition.y)) {
-          const line = buffer.getLine(this.lastCursorPosition.y);
-          if (line) {
-            this.renderLine(line, this.lastCursorPosition.y, dims.cols);
-          }
-        }
-      }
-    }
 
     // Check if we need to redraw selection-related lines
     const hasSelection = this.selectionManager && this.selectionManager.hasSelection();
@@ -358,38 +365,83 @@ export class CanvasRenderer {
     const linkRangeChanged =
       JSON.stringify(this.hoveredLinkRange) !== JSON.stringify(this.previousHoveredLinkRange);
 
+    // Idle skip: nothing changed anywhere — leave the last frame on the canvas.
+    // Not taken while blinking (blink phase repaints the cursor line) or while
+    // a scrollbar fade is animating. The canvas is retained, so the previously
+    // painted cursor overlay stays visible.
+    if (
+      !forceAll &&
+      !anyDirty &&
+      !cursorMoved &&
+      !this.cursorBlink &&
+      selectionRows.size === 0 &&
+      !hyperlinkChanged &&
+      !linkRangeChanged &&
+      scrollbarOpacity === this.lastScrollbarOpacity
+    ) {
+      return;
+    }
+
+    // ONE viewport fetch for the whole pass. Every screen-row read below uses
+    // this pooled array; per-row getLine() would re-extract the full viewport
+    // from WASM each call. Scrollback rows still fetch individually (only
+    // reachable when scrolled, which now only repaints on actual change).
+    const cells = buffer.getViewport ? buffer.getViewport() : null;
+    this.currentCells = cells;
+    this.currentCols = dims.cols;
+
+    // Row accessor for this pass: pooled cells for screen rows, per-line fetch
+    // for scrollback rows (only reachable while scrolled). Returns null for
+    // rows that don't exist.
+    const rowAt = (y: number): { src: GhosttyCell[]; base: number; count: number } | null => {
+      if (viewportY > 0 && y < viewportY && scrollbackProvider) {
+        // Floor viewportY for array access (handles fractional values during smooth scroll)
+        const line = scrollbackProvider.getScrollbackLine(
+          scrollbackLength - Math.floor(viewportY) + y
+        );
+        return line ? { src: line, base: 0, count: line.length } : null;
+      }
+      const screenRow = viewportY > 0 ? y - Math.floor(viewportY) : y;
+      if (screenRow < 0 || screenRow >= dims.rows) return null;
+      if (cells) return { src: cells, base: screenRow * dims.cols, count: dims.cols };
+      const line = buffer.getLine(screenRow);
+      return line ? { src: line, base: 0, count: line.length } : null;
+    };
+    const paintRow = (y: number): boolean => {
+      const row = rowAt(y);
+      if (!row) return false;
+      this.renderLine(row.src, y, dims.cols, row.base, row.count);
+      return true;
+    };
+
+    // Cursor line repaint for pure cursor motion (row not dirty, e.g. arrow keys)
+    if (cursorMoved || this.cursorBlink) {
+      if (!forceAll && !buffer.isRowDirty(cursor.y)) {
+        paintRow(cursor.y);
+      }
+      if (cursorMoved && this.lastCursorPosition.y !== cursor.y) {
+        // Also redraw old cursor line if cursor moved to different line
+        if (!forceAll && !buffer.isRowDirty(this.lastCursorPosition.y)) {
+          paintRow(this.lastCursorPosition.y);
+        }
+      }
+    }
+
     if (hyperlinkChanged) {
       // Find rows containing the old or new hovered hyperlink
       // Must check the correct buffer based on viewportY (scrollback vs screen)
       for (let y = 0; y < dims.rows; y++) {
-        let line: GhosttyCell[] | null = null;
-
-        // Same logic as rendering: fetch from scrollback or screen
-        if (viewportY > 0) {
-          if (y < viewportY && scrollbackProvider) {
-            // This row is from scrollback
-            // Floor viewportY for array access (handles fractional values during smooth scroll)
-            const scrollbackOffset = scrollbackLength - Math.floor(viewportY) + y;
-            line = scrollbackProvider.getScrollbackLine(scrollbackOffset);
-          } else {
-            // This row is from visible screen
-            const screenRow = y - Math.floor(viewportY);
-            line = buffer.getLine(screenRow);
-          }
-        } else {
-          // At bottom - fetch from visible screen
-          line = buffer.getLine(y);
-        }
-
-        if (line) {
-          for (const cell of line) {
-            if (
-              cell.hyperlink_id === this.hoveredHyperlinkId ||
-              cell.hyperlink_id === this.previousHoveredHyperlinkId
-            ) {
-              hyperlinkRows.add(y);
-              break; // Found hyperlink in this row
-            }
+        const row = rowAt(y);
+        if (!row) continue;
+        for (let i = 0; i < row.count; i++) {
+          const cell = row.src[row.base + i];
+          if (
+            cell &&
+            (cell.hyperlink_id === this.hoveredHyperlinkId ||
+              cell.hyperlink_id === this.previousHoveredHyperlinkId)
+          ) {
+            hyperlinkRows.add(y);
+            break; // Found hyperlink in this row
           }
         }
       }
@@ -427,10 +479,12 @@ export class CanvasRenderer {
     // adjacent rows' visual space.
     const rowsToRender = new Set<number>();
     for (let y = 0; y < dims.rows; y++) {
-      // When scrolled, always force render all lines since we're showing scrollback
+      // While scrolled, screen-relative dirty rows don't map to viewport rows;
+      // content changes already forced forceAll above, so only forceAll and
+      // selection/hyperlink overlays repaint here.
       const needsRender =
         viewportY > 0
-          ? true
+          ? forceAll || selectionRows.has(y) || hyperlinkRows.has(y)
           : forceAll || buffer.isRowDirty(y) || selectionRows.has(y) || hyperlinkRows.has(y);
 
       if (needsRender) {
@@ -447,34 +501,8 @@ export class CanvasRenderer {
         continue;
       }
 
-      anyLinesRendered = true;
-
-      // Fetch line from scrollback or visible screen
-      let line: GhosttyCell[] | null = null;
-      if (viewportY > 0) {
-        // Scrolled up - need to fetch from scrollback + visible screen
-        // When scrolled up N lines, we want to show:
-        // - Scrollback lines (from the end) + visible screen lines
-
-        // Check if this row should come from scrollback or visible screen
-        if (y < viewportY && scrollbackProvider) {
-          // This row is from scrollback (upper part of viewport)
-          // Get from end of scrollback buffer
-          // Floor viewportY for array access (handles fractional values during smooth scroll)
-          const scrollbackOffset = scrollbackLength - Math.floor(viewportY) + y;
-          line = scrollbackProvider.getScrollbackLine(scrollbackOffset);
-        } else {
-          // This row is from visible screen (lower part of viewport)
-          const screenRow = viewportY > 0 ? y - Math.floor(viewportY) : y;
-          line = buffer.getLine(screenRow);
-        }
-      } else {
-        // At bottom - fetch from visible screen
-        line = buffer.getLine(y);
-      }
-
-      if (line) {
-        this.renderLine(line, y, dims.cols);
+      if (paintRow(y)) {
+        anyLinesRendered = true;
       }
     }
 
@@ -492,6 +520,7 @@ export class CanvasRenderer {
     if (scrollbackProvider && scrollbarOpacity > 0) {
       this.renderScrollbar(viewportY, scrollbackLength, dims.rows, scrollbarOpacity);
     }
+    this.lastScrollbarOpacity = scrollbarOpacity;
 
     // Update last cursor position
     this.lastCursorPosition = { x: cursor.x, y: cursor.y };
@@ -513,7 +542,13 @@ export class CanvasRenderer {
    * and text in a single pass (cell by cell), the background of cell N would
    * cover any left-extending portions of graphemes from cell N-1.
    */
-  private renderLine(line: GhosttyCell[], y: number, cols: number): void {
+  private renderLine(
+    line: GhosttyCell[],
+    y: number,
+    cols: number,
+    base: number = 0,
+    count: number = line.length - base
+  ): void {
     const lineY = y * this.metrics.height;
     const lineWidth = cols * this.metrics.width;
 
@@ -529,17 +564,17 @@ export class CanvasRenderer {
     // PASS 1: Draw all cell backgrounds first
     // This ensures all backgrounds are painted before any text, allowing text
     // to "bleed" across cell boundaries without being covered by adjacent backgrounds
-    for (let x = 0; x < line.length; x++) {
-      const cell = line[x];
-      if (cell.width === 0) continue; // Skip spacer cells for wide characters
+    for (let x = 0; x < count; x++) {
+      const cell = line[base + x];
+      if (!cell || cell.width === 0) continue; // Skip spacer cells for wide characters
       this.renderCellBackground(cell, x, y);
     }
 
     // PASS 2: Draw all cell text and decorations
     // Now text can safely extend beyond cell boundaries (for complex scripts)
-    for (let x = 0; x < line.length; x++) {
-      const cell = line[x];
-      if (cell.width === 0) continue; // Skip spacer cells for wide characters
+    for (let x = 0; x < count; x++) {
+      const cell = line[base + x];
+      if (!cell || cell.width === 0) continue; // Skip spacer cells for wide characters
       this.renderCellText(cell, x, y);
     }
   }
@@ -726,15 +761,19 @@ export class CanvasRenderer {
       case 'block':
         // Full cell block
         this.ctx.fillRect(cursorX, cursorY, this.metrics.width, this.metrics.height);
-        // Re-draw character under cursor with cursorAccent color
+        // Re-draw character under cursor with cursorAccent color. Read from the
+        // pooled viewport fetched this pass — getLine() here would re-extract
+        // the whole viewport from WASM on every frame.
         {
-          const line = this.currentBuffer?.getLine(y);
-          if (line?.[x]) {
+          const cell = this.currentCells
+            ? this.currentCells[y * this.currentCols + x]
+            : this.currentBuffer?.getLine(y)?.[x];
+          if (cell) {
             this.ctx.save();
             this.ctx.beginPath();
             this.ctx.rect(cursorX, cursorY, this.metrics.width, this.metrics.height);
             this.ctx.clip();
-            this.renderCellText(line[x], x, y, this.theme.cursorAccent);
+            this.renderCellText(cell, x, y, this.theme.cursorAccent);
             this.ctx.restore();
           }
         }
