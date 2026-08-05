@@ -167,10 +167,10 @@ export class CanvasRenderer {
 
   constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
     this.canvas = canvas;
-    // desynchronized lets supporting platforms present canvas updates without
-    // waiting on the compositor queue (saves up to a frame of latency); it is
-    // a hint and silently ignored where unsupported.
-    const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+    // NOTE: do not pass desynchronized:true here — on macOS Chrome it takes
+    // effect and moves rasterization synchronously onto the main thread:
+    // measured ~5-40ms per commit regardless of how little was painted.
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) {
       throw new Error('Failed to get 2D rendering context');
     }
