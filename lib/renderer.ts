@@ -129,6 +129,15 @@ export class CanvasRenderer {
   private currentCells: GhosttyCell[] | null = null;
   private currentCols: number = 0;
 
+  // Per-row FNV-1a hash of the last painted content. Apps commonly erase and
+  // rewrite rows with identical content (Emacs redisplay, Ink rerenders); the
+  // terminal marks those rows dirty, but repainting them is a no-op. A dirty
+  // row whose hash is unchanged skips painting. Cleared on resize/theme change
+  // (geometry/colors change without cell data changing). Grapheme caveat: the
+  // hash sees only a cluster's first codepoint and length, so a cluster swap
+  // preserving both is missed — accepted as vanishingly rare.
+  private rowShadow: number[] = [];
+
   // Last scrollbar opacity painted; a fade in progress must defeat the idle skip.
   private lastScrollbarOpacity: number = -1;
 
@@ -255,6 +264,10 @@ export class CanvasRenderer {
    * Resize canvas to fit terminal dimensions
    */
   public resize(cols: number, rows: number): void {
+    // Canvas contents are gone after a resize; the shadow no longer describes
+    // what is painted. (Font changes route through here too.)
+    this.rowShadow.length = 0;
+
     const cssWidth = cols * this.metrics.width;
     const cssHeight = rows * this.metrics.height;
 
@@ -417,19 +430,6 @@ export class CanvasRenderer {
       return true;
     };
 
-    // Cursor line repaint for pure cursor motion (row not dirty, e.g. arrow keys)
-    if (cursorMoved || this.cursorBlink) {
-      if (!forceAll && !buffer.isRowDirty(cursor.y)) {
-        paintRow(cursor.y);
-      }
-      if (cursorMoved && this.lastCursorPosition.y !== cursor.y) {
-        // Also redraw old cursor line if cursor moved to different line
-        if (!forceAll && !buffer.isRowDirty(this.lastCursorPosition.y)) {
-          paintRow(this.lastCursorPosition.y);
-        }
-      }
-    }
-
     if (hyperlinkChanged) {
       // Find rows containing the old or new hovered hyperlink
       // Must check the correct buffer based on viewportY (scrollback vs screen)
@@ -480,21 +480,50 @@ export class CanvasRenderer {
     // We also include adjacent rows (above and below) for each dirty row to handle
     // glyph overflow - tall glyphs like Devanagari vowel signs can extend into
     // adjacent rows' visual space.
+    // A full repaint leaves the shadow unknown: skipping is only safe against
+    // a hash of what is actually on the canvas.
+    if (forceAll) {
+      this.rowShadow.length = 0;
+    }
+
     const rowsToRender = new Set<number>();
     for (let y = 0; y < dims.rows; y++) {
+      // Dirty means the app touched the row, not that its pixels changed —
+      // erase-and-rewrite-identical is the common case under key repeat
+      // (Emacs redisplay, Ink rerenders). Hash the row and skip true no-ops.
+      let contentChanged = false;
+      if (viewportY === 0 && !forceAll && buffer.isRowDirty(y)) {
+        if (cells) {
+          const h = this.hashRow(cells, y * dims.cols, dims.cols);
+          contentChanged = h !== this.rowShadow[y];
+          this.rowShadow[y] = h;
+        } else {
+          contentChanged = true;
+        }
+      }
+
       // While scrolled, screen-relative dirty rows don't map to viewport rows;
       // content changes already forced forceAll above, so only forceAll and
       // selection/hyperlink overlays repaint here.
       const needsRender =
         viewportY > 0
           ? forceAll || selectionRows.has(y) || hyperlinkRows.has(y)
-          : forceAll || buffer.isRowDirty(y) || selectionRows.has(y) || hyperlinkRows.has(y);
+          : forceAll || contentChanged || selectionRows.has(y) || hyperlinkRows.has(y);
 
       if (needsRender) {
         rowsToRender.add(y);
         // Include adjacent rows to handle glyph overflow
         if (y > 0) rowsToRender.add(y - 1);
         if (y < dims.rows - 1) rowsToRender.add(y + 1);
+      }
+    }
+
+    // Cursor rows repaint unconditionally: the block overlay must be erased
+    // and redrawn even when the row's cell content is unchanged.
+    if (viewportY === 0 && (cursorMoved || this.cursorBlink)) {
+      rowsToRender.add(cursor.y);
+      if (cursorMoved && this.lastCursorPosition.y !== cursor.y) {
+        rowsToRender.add(this.lastCursorPosition.y);
       }
     }
 
@@ -532,6 +561,26 @@ export class CanvasRenderer {
     // This is critical - if we don't clear after a full redraw, the dirty
     // state persists and the next frame might not detect new changes properly.
     buffer.clearDirty();
+  }
+
+  /** FNV-1a over the cell fields that affect pixels. */
+  private hashRow(cells: GhosttyCell[], base: number, count: number): number {
+    let h = 0x811c9dc5 | 0;
+    for (let i = 0; i < count; i++) {
+      const c = cells[base + i];
+      if (!c) continue;
+      h ^= c.codepoint;
+      h = Math.imul(h, 0x01000193);
+      h ^= (c.fg_r << 16) | (c.fg_g << 8) | c.fg_b;
+      h = Math.imul(h, 0x01000193);
+      h ^= (c.bg_r << 16) | (c.bg_g << 8) | c.bg_b;
+      h = Math.imul(h, 0x01000193);
+      h ^= (c.flags << 24) | (c.width << 16) | c.hyperlink_id;
+      h = Math.imul(h, 0x01000193);
+      h ^= c.grapheme_len;
+      h = Math.imul(h, 0x01000193);
+    }
+    return h | 0;
   }
 
   /**
@@ -829,6 +878,8 @@ export class CanvasRenderer {
    * Update theme colors
    */
   public setTheme(theme: ITheme): void {
+    // Default fg/bg feed painted pixels without appearing in cell data.
+    this.rowShadow.length = 0;
     this.theme = { ...DEFAULT_THEME, ...theme };
 
     // Rebuild palette

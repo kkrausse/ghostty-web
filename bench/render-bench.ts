@@ -52,6 +52,20 @@ async function bench(label: string, mod: any, wasmPath: string) {
     tui.push(performance.now() - t);
   }
 
+  // Scenario 4 (run before idle to keep dirty-state realistic): rewrite 30
+  // rows with UNCHANGED content — the Emacs-redisplay / Ink-rerender case.
+  let same30 = '';
+  for (let r = 10; r < 40; r++) same30 += `\x1b[${r};1Hrow ${r} static ${'y'.repeat(80)}`;
+  term.write(same30);
+  render();
+  const rewrite: number[] = [];
+  for (let i = 0; i < REPS; i++) {
+    term.write(same30);
+    const t = performance.now();
+    render();
+    rewrite.push(performance.now() - t);
+  }
+
   // Scenario 3: idle frame (nothing dirty)
   const idle: number[] = [];
   for (let i = 0; i < REPS; i++) {
@@ -62,7 +76,9 @@ async function bench(label: string, mod: any, wasmPath: string) {
 
   console.log(
     `${label.padEnd(8)} echo p50=${p(echo, 0.5)}ms p95=${p(echo, 0.95)}ms | ` +
-      `tui30 p50=${p(tui, 0.5)}ms p95=${p(tui, 0.95)}ms | idle p50=${p(idle, 0.5)}ms p95=${p(idle, 0.95)}ms`
+      `tui30 p50=${p(tui, 0.5)}ms p95=${p(tui, 0.95)}ms | ` +
+      `rewrite30 p50=${p(rewrite, 0.5)}ms p95=${p(rewrite, 0.95)}ms | ` +
+      `idle p50=${p(idle, 0.5)}ms p95=${p(idle, 0.95)}ms`
   );
   term.dispose?.();
 }
