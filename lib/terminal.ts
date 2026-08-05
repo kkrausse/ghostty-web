@@ -241,15 +241,12 @@ export class Terminal implements ITerminalCore {
       this.selectionManager.clearSelection();
     }
 
-    // Resize canvas to match new font metrics
+    // Resize canvas to match new font metrics. renderer.resize() owns ALL
+    // canvas sizing: it sets the devicePixelRatio-scaled backing store, the
+    // CSS size, and the context scale. Writing canvas.width here without the
+    // ratio would clobber that to a 1x backing (blurry on retina) and reset
+    // the context transform.
     this.renderer.resize(this.cols, this.rows);
-
-    // Update canvas element dimensions to match renderer
-    const metrics = this.renderer.getMetrics();
-    this.canvas.width = metrics.width * this.cols;
-    this.canvas.height = metrics.height * this.rows;
-    this.canvas.style.width = `${metrics.width * this.cols}px`;
-    this.canvas.style.height = `${metrics.height * this.rows}px`;
 
     // Force full re-render with new font
     this.renderer.render(this.wasmTerm, true, this.viewportY, this);
@@ -691,15 +688,10 @@ export class Terminal implements ITerminalCore {
       // Resize WASM terminal (may reallocate buffers, invalidating TypedArray views)
       this.wasmTerm!.resize(cols, rows);
 
-      // Resize renderer
+      // Resize renderer. It owns ALL canvas sizing (devicePixelRatio-scaled
+      // backing store, CSS size, context scale) — writing canvas.width here
+      // without the ratio clobbered it to a 1x backing (blurry on retina).
       this.renderer!.resize(cols, rows);
-
-      // Update canvas dimensions
-      const metrics = this.renderer!.getMetrics();
-      this.canvas!.width = metrics.width * cols;
-      this.canvas!.height = metrics.height * rows;
-      this.canvas!.style.width = `${metrics.width * cols}px`;
-      this.canvas!.style.height = `${metrics.height * rows}px`;
 
       // Fire resize event
       this.resizeEmitter.fire({ cols, rows });
