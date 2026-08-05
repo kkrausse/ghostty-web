@@ -329,6 +329,15 @@ export class CanvasRenderer {
       forceAll = true;
     }
 
+    // Browser zoom and cross-display window moves change devicePixelRatio at
+    // runtime; keeping the value captured at construction renders the canvas
+    // at a stale backing resolution (blurry once stretched). Refresh it and
+    // rebuild the canvas when it moves.
+    if (typeof window !== 'undefined' && window.devicePixelRatio && window.devicePixelRatio !== this.devicePixelRatio) {
+      this.devicePixelRatio = window.devicePixelRatio;
+      this.lastResizeCols = -1; // force resize at the new ratio
+    }
+
     // Resize canvas if dimensions changed. Compare against what resize() was
     // last called with, NOT recomputed pixel dimensions: canvas.width is an
     // integer while cols*cellWidth*devicePixelRatio is fractional whenever
