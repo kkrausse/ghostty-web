@@ -141,6 +141,9 @@ export class CanvasRenderer {
   // Last scrollbar opacity painted; a fade in progress must defeat the idle skip.
   private lastScrollbarOpacity: number = -1;
 
+  // Whether the last pass actually drew the scrollbar (see heal logic in render()).
+  private lastScrollbarPainted: boolean = false;
+
   // What resize() last configured the canvas for (see needsResize in render()).
   private lastResizeCols: number = -1;
   private lastResizeRows: number = -1;
@@ -362,6 +365,15 @@ export class CanvasRenderer {
     }
 
     const anyDirty = buffer.isDirty ? buffer.isDirty() : true;
+
+    // While painted, the scrollbar overwrites right-edge cell pixels without
+    // touching cell data, so the row-hash skip would preserve the damage
+    // forever. Heal with one full repaint when the scrollbar disappears.
+    const scrollbarPainted = !!scrollbackProvider && scrollbarOpacity > 0 && scrollbackLength > 0;
+    if (this.lastScrollbarPainted && !scrollbarPainted) {
+      forceAll = true;
+    }
+    this.lastScrollbarPainted = scrollbarPainted;
 
     // While scrolled, new output shifts rows under the viewport (screen rows
     // migrate into scrollback), so any dirt means a full repaint. Without
@@ -993,13 +1005,17 @@ export class CanvasRenderer {
     const scrollbarPadding = 4;
     const scrollbarTrackHeight = canvasHeight - scrollbarPadding * 2;
 
-    // Always clear the scrollbar area first (fixes ghosting when fading out)
+    // Nothing to draw: leave the canvas untouched. The old code cleared the
+    // strip before this check, blanking the right edge of alt-screen apps
+    // (scrollback 0) whenever a scrollbar fade was in flight.
+    if (opacity <= 0 || scrollbackLength === 0) return;
+
+    // Clear the scrollbar area before drawing (fixes ghosting during fade).
+    // This overwrites cell content; render() forces a full repaint when the
+    // scrollbar disappears to heal the strip.
     ctx.clearRect(scrollbarX - 2, 0, scrollbarWidth + 6, canvasHeight);
     ctx.fillStyle = this.theme.background;
     ctx.fillRect(scrollbarX - 2, 0, scrollbarWidth + 6, canvasHeight);
-
-    // Don't draw scrollbar if fully transparent or no scrollback
-    if (opacity <= 0 || scrollbackLength === 0) return;
 
     // Calculate scrollbar thumb size and position
     const totalLines = scrollbackLength + visibleRows;
