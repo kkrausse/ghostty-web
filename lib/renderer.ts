@@ -10,42 +10,19 @@
  * - Dirty line optimization for 60 FPS
  */
 
+import { type FontMetrics, measureFontMetrics } from './font-metrics';
 import type { ITheme } from './interfaces';
+import type { IRenderable, IScrollbackProvider, ITerminalRenderer } from './renderer-interface';
 import type { SelectionManager } from './selection-manager';
+import { DEFAULT_THEME } from './theme';
 import type { GhosttyCell, ILink } from './types';
 import { CellFlags } from './types';
 
-// Interface for objects that can be rendered
-export interface IRenderable {
-  getLine(y: number): GhosttyCell[] | null;
-  getCursor(): { x: number; y: number; visible: boolean };
-  getDimensions(): { cols: number; rows: number };
-  isRowDirty(y: number): boolean;
-  /** Returns true if a full redraw is needed (e.g., screen change) */
-  needsFullRedraw?(): boolean;
-  clearDirty(): void;
-  /**
-   * Pooled full-viewport cell array (rows*cols, row-major), refreshed on call.
-   * When present, the renderer fetches it ONCE per render pass instead of
-   * calling getLine() per row — getLine() re-extracts the entire viewport
-   * from WASM on every call, which made per-row fetching O(rows * cells).
-   * The array is a reused pool: valid until the next getViewport()/resize.
-   */
-  getViewport?(): GhosttyCell[];
-  /** True when terminal state changed since the last clearDirty(). */
-  isDirty?(): boolean;
-  /**
-   * Get the full grapheme string for a cell at (row, col).
-   * For cells with grapheme_len > 0, this returns all codepoints combined.
-   * For simple cells, returns the single character.
-   */
-  getGraphemeString?(row: number, col: number): string;
-}
-
-export interface IScrollbackProvider {
-  getScrollbackLine(offset: number): GhosttyCell[] | null;
-  getScrollbackLength(): number;
-}
+// The renderer seam and cell metrics live outside this file so backends can
+// share them; re-exported here because this was their original home.
+export type { IRenderable, IScrollbackProvider } from './renderer-interface';
+export type { FontMetrics } from './font-metrics';
+export { DEFAULT_THEME } from './theme';
 
 // ============================================================================
 // Type Definitions
@@ -60,48 +37,11 @@ export interface RendererOptions {
   devicePixelRatio?: number; // Default: window.devicePixelRatio
 }
 
-export interface FontMetrics {
-  width: number; // Character cell width in CSS pixels
-  height: number; // Character cell height in CSS pixels
-  baseline: number; // Distance from top to text baseline
-}
-
-// ============================================================================
-// Default Theme
-// ============================================================================
-
-export const DEFAULT_THEME: Required<ITheme> = {
-  foreground: '#d4d4d4',
-  background: '#1e1e1e',
-  cursor: '#ffffff',
-  cursorAccent: '#1e1e1e',
-  // Selection colors: solid colors that replace cell bg/fg when selected
-  // Using Ghostty's approach: selection bg = default fg, selection fg = default bg
-  selectionBackground: '#d4d4d4',
-  selectionForeground: '#1e1e1e',
-  black: '#000000',
-  red: '#cd3131',
-  green: '#0dbc79',
-  yellow: '#e5e510',
-  blue: '#2472c8',
-  magenta: '#bc3fbc',
-  cyan: '#11a8cd',
-  white: '#e5e5e5',
-  brightBlack: '#666666',
-  brightRed: '#f14c4c',
-  brightGreen: '#23d18b',
-  brightYellow: '#f5f543',
-  brightBlue: '#3b8eea',
-  brightMagenta: '#d670d6',
-  brightCyan: '#29b8db',
-  brightWhite: '#ffffff',
-};
-
 // ============================================================================
 // CanvasRenderer Class
 // ============================================================================
 
-export class CanvasRenderer {
+export class CanvasRenderer implements ITerminalRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private fontSize: number;
@@ -227,27 +167,7 @@ export class CanvasRenderer {
   // ==========================================================================
 
   private measureFont(): FontMetrics {
-    // Use an offscreen canvas for measurement
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-
-    // Set font (use actual pixel size for accurate measurement)
-    ctx.font = `${this.fontSize}px ${this.fontFamily}`;
-
-    // Measure width using 'M' (typically widest character)
-    const widthMetrics = ctx.measureText('M');
-    const width = Math.ceil(widthMetrics.width);
-
-    // Measure height using ascent + descent with padding for glyph overflow
-    const ascent = widthMetrics.actualBoundingBoxAscent || this.fontSize * 0.8;
-    const descent = widthMetrics.actualBoundingBoxDescent || this.fontSize * 0.2;
-
-    // Add 2px padding to height to account for glyphs that overflow (like 'f', 'd', 'g', 'p')
-    // and anti-aliasing pixels
-    const height = Math.ceil(ascent + descent) + 2;
-    const baseline = Math.ceil(ascent) + 1; // Offset baseline by half the padding
-
-    return { width, height, baseline };
+    return measureFontMetrics(this.fontSize, this.fontFamily);
   }
 
   /**
@@ -336,7 +256,11 @@ export class CanvasRenderer {
     // runtime; keeping the value captured at construction renders the canvas
     // at a stale backing resolution (blurry once stretched). Refresh it and
     // rebuild the canvas when it moves.
-    if (typeof window !== 'undefined' && window.devicePixelRatio && window.devicePixelRatio !== this.devicePixelRatio) {
+    if (
+      typeof window !== 'undefined' &&
+      window.devicePixelRatio &&
+      window.devicePixelRatio !== this.devicePixelRatio
+    ) {
       this.devicePixelRatio = window.devicePixelRatio;
       this.lastResizeCols = -1; // force resize at the new ratio
     }

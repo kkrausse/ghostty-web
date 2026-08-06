@@ -19,6 +19,13 @@ export interface ITerminalOptions {
   convertEol?: boolean; // Convert \n to \r\n (default: false)
   disableStdin?: boolean; // Disable keyboard input (default: false)
 
+  /**
+   * Paint backend. 'webgl' uses the GPU renderer (glyph atlas + instanced
+   * quads); 'canvas' is the default Canvas2D one. Unsupported WebGL2 falls
+   * back to canvas.
+   */
+  rendererType?: 'canvas' | 'webgl';
+
   // Scrolling options
   smoothScrollDuration?: number; // Duration in ms for smooth scroll animation (default: 100, 0 = instant)
 

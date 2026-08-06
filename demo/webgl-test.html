@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ghostty-web WebGL renderer POC</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #101014;
+        color: #d4d4d4;
+        font:
+          13px -apple-system,
+          sans-serif;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 10px;
+      }
+      #controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      button {
+        background: #24242c;
+        color: #d4d4d4;
+        border: 1px solid #3a3a44;
+        border-radius: 5px;
+        padding: 5px 9px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #2f2f3a;
+      }
+      .pane {
+        margin-bottom: 14px;
+      }
+      .label {
+        font-family: ui-monospace, monospace;
+        color: #8a8a9a;
+        margin-bottom: 4px;
+      }
+      .term {
+        display: inline-block;
+      }
+      pre#out {
+        font-family: ui-monospace, monospace;
+        background: #16161c;
+        border: 1px solid #2a2a34;
+        border-radius: 6px;
+        padding: 10px;
+        white-space: pre-wrap;
+        min-height: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ghostty-web WebGL renderer POC — parity + repaint cost</h1>
+    <div id="controls">
+      <button onclick="writeCorpus()">write corpus</button>
+      <button onclick="benchAll()">bench repaints</button>
+      <button onclick="benchAllSync()">bench repaints (flushed)</button>
+      <button onclick="benchScroll()">bench busy scroll</button>
+      <button onclick="addImages()">image placements (z=-1 / z=+1)</button>
+      <button onclick="clearImages()">clear images</button>
+      <button onclick="selectSome()">select rows 2-4</button>
+      <button onclick="loseContext()">lose+restore webgl context</button>
+      <button onclick="resizeFont()">font 15 &lt;-&gt; 18</button>
+    </div>
+    <pre id="out">ready</pre>
+    <div id="panes"></div>
+
+    <script type="module">
+      import { FitAddon } from '../lib/addons/fit.ts';
+      import { Terminal, init } from '../lib/index.ts';
+
+      const params = new URLSearchParams(location.search);
+      const COLS = Number(params.get('cols') ?? 120);
+      const ROWS = Number(params.get('rows') ?? 30);
+      const WHICH = params.get('renderer') ?? 'both';
+      const FONT_SIZE = Number(params.get('fontSize') ?? 15);
+
+      const out = document.getElementById('out');
+      const log = (msg) => {
+        out.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
+        console.log('[poc]', msg);
+      };
+
+      await init();
+
+      const terms = [];
+      const panes = document.getElementById('panes');
+      for (const type of WHICH === 'both' ? ['canvas', 'webgl'] : [WHICH]) {
+        const pane = document.createElement('div');
+        pane.className = 'pane';
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = `${type} — ${COLS}x${ROWS}`;
+        const host = document.createElement('div');
+        host.className = 'term';
+        pane.append(label, host);
+        panes.append(pane);
+
+        const term = new Terminal({
+          cols: COLS,
+          rows: ROWS,
+          fontSize: FONT_SIZE,
+          fontFamily: "'JetBrains Mono', Menlo, monospace",
+          cursorBlink: false,
+          scrollback: 5000,
+          smoothScrollDuration: 0,
+          rendererType: type,
+        });
+        await term.open(host);
+        terms.push({ type, term, label });
+        label.textContent += ` — ${term.renderer.constructor.name}`;
+      }
+      window.terms = terms;
+
+      // ---------------------------------------------------------------- corpus
+      const ESC = '\x1b[';
+      function corpus() {
+        const lines = [];
+        lines.push('ghostty-web renderer parity corpus');
+        lines.push(
+          [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${ESC}3${i}m ANSI${i} ${ESC}0m`).join('') +
+            [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${ESC}9${i}m BR${i} ${ESC}0m`).join('')
+        );
+        lines.push(
+          [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${ESC}4${i}m bg${i} ${ESC}0m`).join('') +
+            `${ESC}7m inverse ${ESC}0m${ESC}2m faint ${ESC}0m${ESC}1m bold ${ESC}0m` +
+            `${ESC}3m italic ${ESC}0m${ESC}4m underline ${ESC}0m${ESC}9m strike ${ESC}0m`
+        );
+        // 256-color ramp and a truecolor gradient: the case a color-keyed atlas
+        // would thrash on.
+        lines.push(
+          Array.from({ length: 72 }, (_, i) => `${ESC}48;5;${16 + i * 3}m `).join('') + `${ESC}0m`
+        );
+        lines.push(
+          Array.from(
+            { length: 72 },
+            (_, i) => `${ESC}38;2;${(i * 3) % 256};${(255 - i * 3) % 256};${(i * 7) % 256}m▓`
+          ).join('') + `${ESC}0m`
+        );
+        lines.push('wide CJK: 日本語のテキスト 中文字符 한국어 — spacers must align');
+        lines.push('combining: हिन्दी क्षि ि े ो — left-extending marks');
+        lines.push('emoji: 🎉 🚀 🐛 ✅ ❌ 🔥 — color glyphs pass through untinted');
+        lines.push('box: ┌───┬───┐ ╔═══╦═══╗ ├───┼───┤ │ ▁▂▃▄▅▆▇█ ░▒▓ ◢◣◤◥');
+        const OSC8 = (uri) => `\x1b]8;;${uri}\x07`;
+        lines.push(
+          `osc8: ${OSC8('https://example.com')}hyperlinked text${OSC8('')}` +
+            ' plain https://example.com/regex'
+        );
+        for (let i = lines.length; i < ROWS - 1; i++) {
+          lines.push(
+            `${String(i).padStart(3, '0')} ${ESC}38;5;${(i * 11) % 256}m` +
+              'the quick brown fox jumps over the lazy dog 0123456789 '
+                .repeat(4)
+                .slice(0, COLS - 8) +
+              `${ESC}0m`
+          );
+        }
+        return `${ESC}H${ESC}2J${lines.join('\r\n')}`;
+      }
+
+      window.writeCorpus = () => {
+        for (const { term } of terms) term.write(corpus());
+        log(`wrote corpus to ${terms.length} terminal(s)`);
+      };
+
+      // ------------------------------------------------------------ benchmarks
+      const pct = (arr, q) =>
+        arr.length
+          ? +[...arr].sort((a, b) => a - b)[Math.floor(q * (arr.length - 1))].toFixed(3)
+          : 0;
+
+      /** Forced full repaints: the metric the POC exists to move. */
+      window.benchAll = () => {
+        const result = {};
+        for (const { type, term } of terms) {
+          const samples = [];
+          // Warm the glyph atlas / font cache first.
+          for (let i = 0; i < 5; i++) term.renderer.render(term.wasmTerm, true, 0, term, 0);
+          for (let i = 0; i < 120; i++) {
+            const t0 = performance.now();
+            term.renderer.render(term.wasmTerm, true, 0, term, 0);
+            samples.push(performance.now() - t0);
+          }
+          result[type] = {
+            fullRepaintMs: {
+              p50: pct(samples, 0.5),
+              p95: pct(samples, 0.95),
+              max: pct(samples, 1),
+            },
+          };
+        }
+        log(result);
+        return result;
+      };
+
+      /**
+       * Same repaints, but each frame ends with a 1-pixel readback so the
+       * measurement includes rasterization. Chrome records Canvas2D calls and
+       * rasterizes them off the JS thread, so render() duration alone
+       * understates its real cost (and shows up later as p95 spikes).
+       */
+      window.benchAllSync = () => {
+        const result = {};
+        for (const { type, term } of terms) {
+          const canvas = term.renderer.getCanvas();
+          let flush;
+          if (type === 'webgl') {
+            const gl = canvas.getContext('webgl2');
+            const px = new Uint8Array(4);
+            flush = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          } else {
+            const ctx = canvas.getContext('2d');
+            flush = () => ctx.getImageData(0, 0, 1, 1);
+          }
+          const samples = [];
+          for (let i = 0; i < 5; i++) {
+            term.renderer.render(term.wasmTerm, true, 0, term, 0);
+            flush();
+          }
+          for (let i = 0; i < 60; i++) {
+            const t0 = performance.now();
+            term.renderer.render(term.wasmTerm, true, 0, term, 0);
+            flush();
+            samples.push(performance.now() - t0);
+          }
+          result[type] = {
+            fullRepaintSyncMs: {
+              p50: pct(samples, 0.5),
+              p95: pct(samples, 0.95),
+              max: pct(samples, 1),
+            },
+          };
+        }
+        log(result);
+        return result;
+      };
+
+      /** Steady output: dirty-row repaints while the screen scrolls. */
+      window.benchScroll = () => {
+        const result = {};
+        const payload = Array.from(
+          { length: 200 },
+          (_, i) =>
+            `${ESC}38;5;${(i * 7) % 256}mline ${i} ` +
+            'abcdefghijklmnopqrstuvwxyz0123456789 '.repeat(3).slice(0, COLS - 20) +
+            `${ESC}0m\r\n`
+        ).join('');
+        for (const { type, term } of terms) {
+          const samples = [];
+          term.write(payload);
+          for (let i = 0; i < 200; i++) {
+            term.write(
+              `${ESC}38;5;${(i * 13) % 256}mscroll ${i} ` +
+                'the quick brown fox jumps over the lazy dog '.repeat(3).slice(0, COLS - 20) +
+                `${ESC}0m\r\n`
+            );
+            const t0 = performance.now();
+            term.renderer.render(term.wasmTerm, false, 0, term, 0);
+            samples.push(performance.now() - t0);
+          }
+          result[type] = {
+            scrollRepaintMs: {
+              p50: pct(samples, 0.5),
+              p95: pct(samples, 0.95),
+              max: pct(samples, 1),
+            },
+          };
+        }
+        log(result);
+        return result;
+      };
+
+      // ---------------------------------------------------------------- images
+      function makeBitmap(text, hue) {
+        const c = document.createElement('canvas');
+        c.width = 320;
+        c.height = 160;
+        const ctx = c.getContext('2d');
+        const grad = ctx.createLinearGradient(0, 0, 320, 160);
+        grad.addColorStop(0, `hsla(${hue}, 90%, 55%, 0.95)`);
+        grad.addColorStop(1, `hsla(${hue + 60}, 90%, 45%, 0.55)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 320, 160);
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 26px monospace';
+        ctx.fillText(text, 14, 90);
+        return c;
+      }
+
+      window.addImages = () => {
+        const webgl = terms.find((t) => t.type === 'webgl');
+        if (!webgl) return log('no webgl terminal on this page');
+        webgl.term.renderer.setImagePlacements([
+          {
+            id: 'under',
+            source: makeBitmap('z = -1 (under text)', 200),
+            col: 2,
+            row: 12,
+            cols: 26,
+            rows: 5,
+            z: -1,
+          },
+          {
+            id: 'over',
+            source: makeBitmap('z = +1 (over text)', 20),
+            col: 34,
+            row: 12,
+            cols: 26,
+            rows: 5,
+            z: 1,
+            opacity: 0.9,
+          },
+        ]);
+        log('placed 2 images; left one is behind the text, right one in front');
+      };
+
+      window.clearImages = () => {
+        const webgl = terms.find((t) => t.type === 'webgl');
+        webgl?.term.renderer.setImagePlacements([]);
+        log('cleared image placements');
+      };
+
+      // ------------------------------------------------------------ misc probes
+      window.selectSome = () => {
+        for (const { term } of terms) term.select?.(0, 2, COLS * 3);
+        log('selected rows 2-4 (if select() is available)');
+      };
+
+      window.loseContext = () => {
+        const webgl = terms.find((t) => t.type === 'webgl');
+        if (!webgl) return log('no webgl terminal');
+        const gl = webgl.term.renderer.getCanvas().getContext('webgl2');
+        const ext = gl.getExtension('WEBGL_lose_context');
+        ext.loseContext();
+        log('context lost; restoring in 600ms');
+        setTimeout(() => {
+          ext.restoreContext();
+          log('context restored — screen should repaint intact');
+        }, 600);
+      };
+
+      let big = false;
+      window.resizeFont = () => {
+        big = !big;
+        for (const { term } of terms) {
+          term.options.fontSize = big ? 18 : FONT_SIZE;
+        }
+        log(`font size -> ${big ? 18 : FONT_SIZE}`);
+      };
+
+      window.runAll = async () => {
+        writeCorpus();
+        await new Promise((r) => setTimeout(r, 400));
+        const repaint = benchAll();
+        const scroll = benchScroll();
+        writeCorpus();
+        return { repaint, scroll };
+      };
+
+      log(`ready — ${terms.map((t) => `${t.type}:${t.term.renderer.constructor.name}`).join(' ')}`);
+    </script>
+  </body>
+</html>
