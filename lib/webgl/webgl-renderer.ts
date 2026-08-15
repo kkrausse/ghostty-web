@@ -836,6 +836,11 @@ export class WebglRenderer implements ITerminalRenderer {
     }
   }
 
+  public resetCursorBlink(): void {
+    this.stopCursorBlink();
+    if (this.cursorBlink) this.startCursorBlink();
+  }
+
   public setSelectionManager(manager: SelectionManager): void {
     this.selectionManager = manager;
   }

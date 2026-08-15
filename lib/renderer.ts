@@ -904,6 +904,11 @@ export class CanvasRenderer implements ITerminalRenderer {
     }
   }
 
+  public resetCursorBlink(): void {
+    this.stopCursorBlink();
+    if (this.cursorBlink) this.startCursorBlink();
+  }
+
   /**
    * Get current font metrics
    */

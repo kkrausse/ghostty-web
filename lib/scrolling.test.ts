@@ -136,6 +136,33 @@ describe('Terminal Scrolling', () => {
       expect(dataSent.length).toBeCloseTo(3, 1); // ~3 arrows per click
     });
 
+    test('should send one arrow for a small nonzero wheel delta', async () => {
+      const dataSent: string[] = [];
+      terminal.onData((data) => dataSent.push(data));
+
+      container.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true })
+      );
+
+      expect(dataSent).toEqual(['\x1B[A']);
+    });
+
+    test('should only send a mouse report when mouse tracking is active', async () => {
+      const dataSent: string[] = [];
+      terminal.onData((data) => dataSent.push(data));
+      terminal.write('\x1B[?1000h\x1B[?1006h');
+
+      const event = new WheelEvent('wheel', {
+        deltaY: -100,
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperties(event, { clientX: { value: 1 }, clientY: { value: 1 } });
+      container.dispatchEvent(event);
+
+      expect(dataSent).toEqual(['\x1B[<64;1;1M']);
+    });
+
     test('should not scroll viewport in alternate screen', async () => {
       const initialViewportY = terminal.viewportY;
 
@@ -311,8 +338,8 @@ describe('Terminal Scrolling', () => {
       });
       container.dispatchEvent(wheelEvent);
 
-      // Should not send any arrows (count is 0)
-      expect(dataSent.length).toBe(0);
+      // A nonzero trackpad gesture must not disappear after delta conversion.
+      expect(dataSent).toEqual(['\x1B[A']);
     });
 
     test('should handle terminal not yet opened', async () => {

@@ -87,6 +87,28 @@ describe('SelectionManager', () => {
     });
   });
 
+  describe('Mouse tracking', () => {
+    test('does not start selection unless Shift is held', async () => {
+      if (!container) return;
+
+      const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+      term.open(container);
+      term.write('\x1B[?1000h');
+      const canvas = term.renderer!.getCanvas();
+      const selMgr = (term as any).selectionManager;
+
+      canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+      expect(selMgr.isSelecting).toBe(false);
+
+      canvas.dispatchEvent(
+        new MouseEvent('mousedown', { button: 0, shiftKey: true, bubbles: true })
+      );
+      expect(selMgr.isSelecting).toBe(true);
+
+      term.dispose();
+    });
+  });
+
   describe('Selection with absolute coordinates', () => {
     test('hasSelection returns false when no selection', async () => {
       if (!container) return;

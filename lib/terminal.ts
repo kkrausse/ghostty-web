@@ -460,6 +460,7 @@ export class Terminal implements ITerminalCore {
           }
           // Clear selection when user types
           this.selectionManager?.clearSelection();
+          this.renderer?.resetCursorBlink();
           this.awaitingEcho = true;
           // Input handler fires data events
           this.dataEmitter.fire(data);
@@ -520,9 +521,9 @@ export class Terminal implements ITerminalCore {
       // Setup document-level mouseup for scrollbar drag (so drag works even outside canvas)
       document.addEventListener('mouseup', this.handleMouseUp);
 
-      // Setup wheel event handling for scrolling (Phase 2)
-      // Use capture phase to ensure we get the event before browser scrolling
-      parent.addEventListener('wheel', this.handleWheel, { passive: false, capture: true });
+      // InputHandler registers first so mouse-aware applications receive their
+      // report before this listener handles untracked wheel fallback behavior.
+      parent.addEventListener('wheel', this.handleWheel, { passive: false });
 
       // Render initial blank screen (force full redraw)
       this.renderer.render(this.wasmTerm, true, this.viewportY, this, this.scrollbarOpacity);
@@ -1562,6 +1563,10 @@ export class Terminal implements ITerminalCore {
       return;
     }
 
+    // InputHandler reports the wheel as a mouse button when tracking is active.
+    // Do not also scroll history or synthesize cursor keys for the same event.
+    if (this.wasmTerm?.hasMouseTracking()) return;
+
     // Check if in alternate screen mode (vim, less, htop, etc.)
     const isAltScreen = this.wasmTerm?.isAlternateScreen() ?? false;
 
@@ -1570,7 +1575,7 @@ export class Terminal implements ITerminalCore {
       // Applications like vim handle scrolling internally
       // Standard: ~3 arrow presses per wheel "click"
       const direction = e.deltaY > 0 ? 'down' : 'up';
-      const count = Math.min(Math.abs(Math.round(e.deltaY / 33)), 5); // Cap at 5
+      const count = Math.min(Math.max(1, Math.abs(Math.round(e.deltaY / 33))), 5); // Cap at 5
 
       for (let i = 0; i < count; i++) {
         if (direction === 'up') {

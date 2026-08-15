@@ -2462,6 +2462,24 @@ describe('Options Proxy handleOptionChange', () => {
     term.dispose();
   });
 
+  test('keyboard input makes a blinking cursor visible', async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cursorBlink: true });
+    term.open(container);
+    const renderer = term.renderer!;
+    // @ts-ignore - force the hidden blink phase for the interaction test
+    renderer.cursorVisible = false;
+
+    container.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true })
+    );
+
+    // @ts-ignore - verify input reset the renderer's blink phase
+    expect(renderer.cursorVisible).toBe(true);
+    term.dispose();
+  });
+
   test('changing cols/rows triggers resize', async () => {
     if (!container) return;
 

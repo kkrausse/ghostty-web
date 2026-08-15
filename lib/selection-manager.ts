@@ -67,6 +67,10 @@ export class SelectionManager {
   private autoScrollDirection: number = 0; // -1 = up, 0 = none, 1 = down
   private static readonly AUTO_SCROLL_EDGE_SIZE = 30; // pixels from edge to trigger scroll
 
+  private shouldSelect(event: MouseEvent): boolean {
+    return event.shiftKey || !this.terminal.hasMouseTracking();
+  }
+
   /**
    * Get current viewport Y position (how many lines scrolled into history)
    */
@@ -433,6 +437,7 @@ export class SelectionManager {
 
     // Mouse down - start selection or clear existing
     canvas.addEventListener('mousedown', (e: MouseEvent) => {
+      if (!this.shouldSelect(e)) return;
       if (e.button === 0) {
         // Left click only
 
@@ -597,6 +602,7 @@ export class SelectionManager {
     // Handle click events for double-click (word) and triple-click (line) selection
     // Use event.detail which browsers set to click count (1, 2, 3, etc.)
     canvas.addEventListener('click', (e: MouseEvent) => {
+      if (!this.shouldSelect(e)) return;
       // event.detail: 1 = single, 2 = double, 3 = triple click
       if (e.detail === 2) {
         // Double-click - select word

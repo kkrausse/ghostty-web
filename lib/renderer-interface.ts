@@ -58,6 +58,7 @@ export interface ITerminalRenderer {
   setFontFamily(family: string): void;
   setCursorStyle(style: 'block' | 'underline' | 'bar'): void;
   setCursorBlink(enabled: boolean): void;
+  resetCursorBlink(): void;
   setSelectionManager(manager: SelectionManager): void;
   setHoveredHyperlinkId(hyperlinkId: number): void;
   setHoveredLinkRange(
