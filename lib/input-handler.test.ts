@@ -550,6 +550,23 @@ describe('InputHandler', () => {
       // SelectionManager handles the actual copying
       expect(dataReceived.length).toBe(0);
     });
+
+    test('allows unhandled Cmd shortcuts to reach the browser', () => {
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        }
+      );
+      const event = createKeyEvent('KeyL', 'l', { meta: true });
+
+      simulateKey(container, event);
+
+      expect(dataReceived.length).toBe(0);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    });
   });
 
   describe('Special Keys', () => {

@@ -324,6 +324,17 @@ describe('Terminal Scrolling', () => {
       expect(dataSent.length).toBe(0);
     });
 
+    test('should preserve a scrolled viewport when output arrives', async () => {
+      for (let i = 0; i < 30; i++) terminal.write(`Line ${i}\r\n`);
+      terminal.scrollLines(-5);
+      const before = terminal.getViewportY();
+
+      terminal.write('More output\r\n');
+
+      expect(terminal.getViewportY()).toBeGreaterThanOrEqual(before);
+      expect(terminal.getViewportY()).toBeGreaterThan(0);
+    });
+
     test('should handle very small deltaY values', async () => {
       const dataSent: string[] = [];
       terminal.onData((data) => dataSent.push(data));

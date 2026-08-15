@@ -402,6 +402,10 @@ export class InputHandler {
       return;
     }
 
+    // Unhandled Command shortcuts belong to the browser. Cmd+C/V are handled
+    // above so terminal selection and native paste keep working.
+    if (event.metaKey) return;
+
     // For printable characters without modifiers, send the character directly
     // This handles: a-z, A-Z (with shift), 0-9, punctuation, etc.
     if (this.isPrintableCharacter(event)) {

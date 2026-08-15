@@ -243,7 +243,11 @@ export class GlyphAtlas {
   private hasColor(chars: string, w: number, h: number): boolean {
     let scan = false;
     for (const ch of chars) {
-      if ((ch.codePointAt(0) ?? 0) >= COLOR_SCAN_THRESHOLD) {
+      const codepoint = ch.codePointAt(0) ?? 0;
+      // Terminal drawing glyphs use the cell foreground even when a macOS
+      // fallback font exposes them through a color-capable font.
+      const terminalDrawingGlyph = codepoint >= 0x2500 && codepoint <= 0x259f;
+      if (codepoint >= COLOR_SCAN_THRESHOLD && !terminalDrawingGlyph) {
         scan = true;
         break;
       }

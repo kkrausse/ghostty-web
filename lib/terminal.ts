@@ -460,6 +460,7 @@ export class Terminal implements ITerminalCore {
           }
           // Clear selection when user types
           this.selectionManager?.clearSelection();
+          this.scrollToBottom();
           this.renderer?.resetCursorBlink();
           this.awaitingEcho = true;
           // Input handler fires data events
@@ -563,6 +564,9 @@ export class Terminal implements ITerminalCore {
     // preserve selection when new data arrives. Selection is cleared by user actions
     // like clicking or typing, not by incoming data.
 
+    const wasScrolled = this.viewportY > 0;
+    const previousScrollbackLength = wasScrolled ? this.getScrollbackLength() : 0;
+
     // Write directly to WASM terminal (handles VT parsing internally)
     this.wasmTerm!.write(data);
 
@@ -581,9 +585,16 @@ export class Terminal implements ITerminalCore {
     // Invalidate link cache (content changed)
     this.linkDetector?.invalidateCache();
 
-    // Phase 2: Auto-scroll to bottom on new output (xterm.js behavior)
-    if (this.viewportY !== 0) {
-      this.scrollToBottom();
+    // Keep the same history anchored while applications redraw. viewportY is
+    // measured from the bottom, so account for newly appended scrollback rows.
+    if (wasScrolled) {
+      const scrollbackLength = this.getScrollbackLength();
+      const growth = Math.max(0, scrollbackLength - previousScrollbackLength);
+      if (growth > 0) {
+        this.viewportY = Math.min(scrollbackLength, this.viewportY + growth);
+        this.targetViewportY = this.viewportY;
+        this.scrollEmitter.fire(this.viewportY);
+      }
     }
 
     // Check for title changes (OSC 0, 1, 2 sequences)
