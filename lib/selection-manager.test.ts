@@ -88,6 +88,37 @@ describe('SelectionManager', () => {
   });
 
   describe('Mouse tracking', () => {
+    test('clipboard notification waits for a successful write', async () => {
+      if (!container) return;
+      const results: boolean[] = [];
+      const term = await createIsolatedTerminal({
+        onClipboardWrite: (success) => results.push(success),
+      });
+      const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+      let complete!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        complete = resolve;
+      });
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { write: () => pending, writeText: () => pending },
+      });
+      try {
+        term.open(container);
+        term.write('Hello');
+        term.select(0, 0, 5);
+        expect(term.copySelection()).toBe(true);
+        expect(results).toEqual([]);
+        complete();
+        await pending;
+        expect(results).toEqual([true]);
+      } finally {
+        if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+        else Reflect.deleteProperty(navigator, 'clipboard');
+        term.dispose();
+      }
+    });
+
     test('preferred local drag copies and persists after release with tmux mouse modes', async () => {
       if (!container) return;
       const term = await createIsolatedTerminal({ cols: 80, rows: 24, selectOnDrag: true });

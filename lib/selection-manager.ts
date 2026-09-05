@@ -974,11 +974,16 @@ export class SelectionManager {
         const clipboardItem = new ClipboardItem({
           'text/plain': blob,
         });
-        navigator.clipboard.write([clipboardItem]).catch((err) => {
-          console.warn('ClipboardItem write failed, trying writeText:', err);
-          // Try writeText as fallback
-          this.copyWithWriteText(text);
-        });
+        navigator.clipboard.write([clipboardItem]).then(
+          () => {
+            this.terminal.options.onClipboardWrite(true);
+          },
+          (err) => {
+            console.warn('ClipboardItem write failed, trying writeText:', err);
+            // Try writeText as fallback
+            this.copyWithWriteText(text);
+          }
+        );
         return;
       } catch (err) {
         // ClipboardItem not supported or failed, fall through
@@ -987,11 +992,16 @@ export class SelectionManager {
 
     // Second try: basic async writeText (works in Chrome, may fail in Safari)
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch((err) => {
-        console.warn('Clipboard writeText failed, trying execCommand:', err);
-        // Fall back to execCommand
-        this.copyWithExecCommand(text);
-      });
+      navigator.clipboard.writeText(text).then(
+        () => {
+          this.terminal.options.onClipboardWrite(true);
+        },
+        (err) => {
+          console.warn('Clipboard writeText failed, trying execCommand:', err);
+          // Fall back to execCommand
+          this.copyWithExecCommand(text);
+        }
+      );
       return;
     }
 
@@ -1004,10 +1014,15 @@ export class SelectionManager {
    */
   private copyWithWriteText(text: string): void {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch((err) => {
-        console.warn('Clipboard writeText failed, trying execCommand:', err);
-        this.copyWithExecCommand(text);
-      });
+      navigator.clipboard.writeText(text).then(
+        () => {
+          this.terminal.options.onClipboardWrite(true);
+        },
+        (err) => {
+          console.warn('Clipboard writeText failed, trying execCommand:', err);
+          this.copyWithExecCommand(text);
+        }
+      );
     } else {
       this.copyWithExecCommand(text);
     }
@@ -1044,8 +1059,10 @@ export class SelectionManager {
       if (!success) {
         console.warn('execCommand copy failed');
       }
+      this.terminal.options.onClipboardWrite(success);
     } catch (err) {
       console.warn('execCommand copy threw:', err);
+      this.terminal.options.onClipboardWrite(false);
       // Restore focus on error
       if (previouslyFocused) {
         previouslyFocused.focus();

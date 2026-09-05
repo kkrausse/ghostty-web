@@ -20,6 +20,7 @@ export interface ITerminalOptions {
   disableStdin?: boolean; // Disable keyboard input (default: false)
   selectOnDrag?: boolean; // Prefer local selection; Alt bypasses it (default: false)
   copyOnSelect?: boolean; // Automatically copy mouse selections (default: true)
+  onClipboardWrite?: (success: boolean) => void; // Reports completed local clipboard writes
 
   /**
    * Paint backend. 'webgl' uses the GPU renderer (glyph atlas + instanced
