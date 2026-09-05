@@ -88,6 +88,47 @@ describe('SelectionManager', () => {
   });
 
   describe('Mouse tracking', () => {
+    test('preferred local drag copies and persists after release with tmux mouse modes', async () => {
+      if (!container) return;
+      const term = await createIsolatedTerminal({ cols: 80, rows: 24, selectOnDrag: true });
+      term.open(container);
+      term.write('Hello World\r\n\x1b[?1002h\x1b[?1006h');
+      const canvas = term.renderer!.getCanvas();
+      const metrics = term.renderer!.getMetrics();
+      canvas.getBoundingClientRect = () =>
+        new DOMRect(0, 0, metrics.width * 80, metrics.height * 24);
+      Object.defineProperty(canvas, 'clientHeight', { value: metrics.height * 24 });
+      const selMgr = (term as any).selectionManager;
+      const copied: string[] = [];
+      selMgr.copyToClipboard = (text: string) => copied.push(text);
+      const sent: string[] = [];
+      term.onData((data) => sent.push(data));
+      const mouse = (type: string, col: number) => {
+        const event = new MouseEvent(type, {
+          button: 0,
+          bubbles: true,
+          clientX: col * metrics.width,
+          clientY: 0,
+        });
+        Object.defineProperty(event, 'offsetX', { value: col * metrics.width });
+        Object.defineProperty(event, 'offsetY', { value: 0 });
+        canvas.dispatchEvent(event);
+      };
+      mouse('mousedown', 0);
+      mouse('mousemove', 4);
+      mouse('mouseup', 4);
+      mouse('click', 4);
+      expect(term.getSelection()).toBe('Hello');
+      expect(copied).toEqual(['Hello']);
+      expect(sent).toEqual([]);
+      term.copySelection();
+      expect(copied).toEqual(['Hello', 'Hello']);
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(term.getSelection()).toBe('');
+      term.dispose();
+    });
+
     test('does not start selection unless Shift is held', async () => {
       if (!container) return;
 

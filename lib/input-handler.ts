@@ -162,6 +162,8 @@ const KEY_MAP: Record<string, Key> = {
  * Mouse tracking configuration
  */
 export interface MouseTrackingConfig {
+  /** Prefer local selection unless Alt is held. Wheel reporting is unaffected. */
+  preferSelection?: () => boolean;
   /** Check if any mouse tracking mode is enabled */
   hasMouseTracking: () => boolean;
   /** Check if SGR extended mouse mode is enabled (mode 1006) */
@@ -183,6 +185,7 @@ export class InputHandler {
   private getModeCallback?: (mode: number) => boolean;
   private onCopyCallback?: () => boolean;
   private mouseConfig?: MouseTrackingConfig;
+  private localSelectionGesture = false;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
   private keypressListener: ((e: KeyboardEvent) => void) | null = null;
   private pasteListener: ((e: ClipboardEvent) => void) | null = null;
@@ -822,6 +825,10 @@ export class InputHandler {
    */
   private handleMouseDown(event: MouseEvent): void {
     if (this.isDisposed) return;
+    this.localSelectionGesture =
+      event.button === 0 &&
+      (event.shiftKey || (!!this.mouseConfig?.preferSelection?.() && !event.altKey));
+    if (this.localSelectionGesture) return;
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     const cell = this.pixelToCell(event);
@@ -847,6 +854,10 @@ export class InputHandler {
    */
   private handleMouseUp(event: MouseEvent): void {
     if (this.isDisposed) return;
+    if (event.button === 0 && this.localSelectionGesture) {
+      this.localSelectionGesture = false;
+      return;
+    }
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     const cell = this.pixelToCell(event);
@@ -865,6 +876,12 @@ export class InputHandler {
    */
   private handleMouseMove(event: MouseEvent): void {
     if (this.isDisposed) return;
+    if (
+      this.localSelectionGesture ||
+      event.shiftKey ||
+      (this.mouseConfig?.preferSelection?.() && !event.altKey && this.mouseButtonsPressed === 0)
+    )
+      return;
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     // Check if button motion mode or any-event tracking is enabled

@@ -194,6 +194,41 @@ describe('InputHandler', () => {
   });
 
   describe('Constructor and Lifecycle', () => {
+    test('local drag suppresses mouse reports but Alt-drag and wheel still reach tmux', () => {
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {},
+        undefined,
+        undefined,
+        () => true,
+        undefined,
+        undefined,
+        {
+          preferSelection: () => true,
+          hasMouseTracking: () => true,
+          hasSgrMouseMode: () => true,
+          getCellDimensions: () => ({ width: 10, height: 20 }),
+          getCanvasOffset: () => ({ left: 0, top: 0 }),
+        }
+      );
+      const mouse = { button: 0, clientX: 20, clientY: 20, altKey: false, shiftKey: false };
+      const input = handler as any;
+      input.handleMouseDown(mouse);
+      input.handleMouseMove({ ...mouse, clientX: 80 });
+      input.handleMouseUp(mouse);
+      input.handleMouseMove(mouse);
+      expect(dataReceived).toEqual([]);
+      input.handleMouseDown({ ...mouse, altKey: true });
+      input.handleMouseMove({ ...mouse, altKey: true });
+      input.handleMouseUp({ ...mouse, altKey: true });
+      expect(dataReceived).toHaveLength(3);
+      input.handleWheel({ ...mouse, deltaY: -1, preventDefault() {} });
+      expect(dataReceived).toHaveLength(4);
+      handler.dispose();
+    });
+
     test('creates handler and attaches listeners', () => {
       const handler = new InputHandler(
         ghostty,

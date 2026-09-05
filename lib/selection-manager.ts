@@ -68,7 +68,11 @@ export class SelectionManager {
   private static readonly AUTO_SCROLL_EDGE_SIZE = 30; // pixels from edge to trigger scroll
 
   private shouldSelect(event: MouseEvent): boolean {
-    return event.shiftKey || !this.terminal.hasMouseTracking();
+    return (
+      event.shiftKey ||
+      (this.terminal.options.selectOnDrag && !event.altKey) ||
+      !this.terminal.hasMouseTracking()
+    );
   }
 
   /**

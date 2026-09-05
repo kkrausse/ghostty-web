@@ -152,6 +152,7 @@ export class Terminal implements ITerminalCore {
       allowTransparency: options.allowTransparency ?? false,
       convertEol: options.convertEol ?? false,
       disableStdin: options.disableStdin ?? false,
+      selectOnDrag: options.selectOnDrag ?? false,
       smoothScrollDuration: options.smoothScrollDuration ?? 100, // Default: 100ms smooth scroll
       rendererType: options.rendererType ?? 'canvas',
     };
@@ -437,6 +438,7 @@ export class Terminal implements ITerminalCore {
       const renderer = this.renderer;
       const wasmTerm = this.wasmTerm;
       const mouseConfig: MouseTrackingConfig = {
+        preferSelection: () => this.options.selectOnDrag,
         hasMouseTracking: () => wasmTerm?.hasMouseTracking() ?? false,
         hasSgrMouseMode: () => wasmTerm?.getMode(1006, false) ?? true, // SGR extended mode
         getCellDimensions: () => ({
