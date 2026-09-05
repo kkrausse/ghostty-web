@@ -123,6 +123,15 @@ describe('SelectionManager', () => {
       expect(sent).toEqual([]);
       term.copySelection();
       expect(copied).toEqual(['Hello', 'Hello']);
+      term.options.copyOnSelect = false;
+      mouse('mousedown', 0);
+      mouse('mousemove', 4);
+      mouse('mouseup', 4);
+      mouse('click', 4);
+      expect(term.getSelection()).toBe('Hello');
+      expect(copied).toEqual(['Hello', 'Hello']);
+      term.copySelection();
+      expect(copied).toEqual(['Hello', 'Hello', 'Hello']);
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       expect(term.getSelection()).toBe('');

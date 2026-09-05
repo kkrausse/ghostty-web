@@ -595,7 +595,7 @@ export class SelectionManager {
         if (this.hasSelection()) {
           const text = this.getSelection();
           if (text) {
-            this.copyToClipboard(text);
+            if (this.terminal.options.copyOnSelect) this.copyToClipboard(text);
             this.selectionChangedEmitter.fire();
           }
         }
@@ -621,7 +621,7 @@ export class SelectionManager {
 
           const text = this.getSelection();
           if (text) {
-            this.copyToClipboard(text);
+            if (this.terminal.options.copyOnSelect) this.copyToClipboard(text);
             this.selectionChangedEmitter.fire();
           }
         }
@@ -662,7 +662,7 @@ export class SelectionManager {
 
           const text = this.getSelection();
           if (text) {
-            this.copyToClipboard(text);
+            if (this.terminal.options.copyOnSelect) this.copyToClipboard(text);
             this.selectionChangedEmitter.fire();
           }
         }

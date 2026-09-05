@@ -153,6 +153,7 @@ export class Terminal implements ITerminalCore {
       convertEol: options.convertEol ?? false,
       disableStdin: options.disableStdin ?? false,
       selectOnDrag: options.selectOnDrag ?? false,
+      copyOnSelect: options.copyOnSelect ?? true,
       smoothScrollDuration: options.smoothScrollDuration ?? 100, // Default: 100ms smooth scroll
       rendererType: options.rendererType ?? 'canvas',
     };

@@ -19,6 +19,7 @@ export interface ITerminalOptions {
   convertEol?: boolean; // Convert \n to \r\n (default: false)
   disableStdin?: boolean; // Disable keyboard input (default: false)
   selectOnDrag?: boolean; // Prefer local selection; Alt bypasses it (default: false)
+  copyOnSelect?: boolean; // Automatically copy mouse selections (default: true)
 
   /**
    * Paint backend. 'webgl' uses the GPU renderer (glyph atlas + instanced
