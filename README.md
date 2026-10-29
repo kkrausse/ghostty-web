@@ -1,12 +1,14 @@
 # Ghostty Web
 
-A local browser terminal package (`@random/ghostty-web`) around **official Ghostty WASM**, with an xterm.js-style TypeScript interface and WebGL2 rendering. Its first consumer is [bun-web-terminal](../bun-web-terminal/README.md).
+A browser terminal package (`@random/ghostty-web`) around **official Ghostty WASM**, with an xterm.js-style TypeScript interface and WebGL2 rendering.
+
+Used by bun-web-terminal (in `kkrausse/random`) and by [browser-agent-toolkit](https://github.com/kkrausse/browser-agent-toolkit)'s terminal (`packages/terminal`).
 
 The public API follows familiar terminal operations: `open`, `write`, `resize`, `focus`, `dispose`, `onData`, `onResize`, selection, and addons. This is an xterm.js-style subset, not a promise of drop-in compatibility with every xterm.js API or addon.
 
 ## Use
 
-In this repository, `bun-web-terminal` depends on `file:../ghostty-web`. Bun bundles the TypeScript directly. Serve `@random/ghostty-web/ghostty-vt.wasm` as `/ghostty-vt.wasm` alongside your application, with the `application/wasm` content type.
+Install from a tag: `bun add @random/ghostty-web@git+ssh://git@github.com/kkrausse/ghostty-web.git#v0.1.0`. Bun bundles the TypeScript directly. Serve `@random/ghostty-web/ghostty-vt.wasm` as `/ghostty-vt.wasm` alongside your application, with the `application/wasm` content type.
 
 ```ts
 import { init, Terminal } from "@random/ghostty-web";
@@ -39,7 +41,7 @@ access are package extensions rather than xterm.js compatibility guarantees.
 
 - **Engine:** checked-in `vendor/ghostty-vt.wasm`, downloaded from the official `ghostty-org/ghostty` release. No patched Ghostty source, Zig compiler, or Coder npm WASM is needed at install or runtime.
 - **Bridge:** `src/ghostty.ts` and the official ABI helpers translate the official C API into browser-friendly terminal state, rendering data, keyboard encoding, and terminal replies.
-- **Browser layer:** rendering, input, selection, and addons live under `src/`. This layer preserves useful MIT-licensed code from [Coder's ghostty-web](https://github.com/coder/ghostty-web) and our former [`kkrausse/ghostty-web`](https://github.com/kkrausse/ghostty-web) fork at `a169a863599517272533b9c70789a09556a55b06`. It is maintained here as ordinary source, without the fork/submodule dependency. See [LICENSE](LICENSE).
+- **Browser layer:** rendering, input, selection, and addons live under `src/`. This layer preserves useful MIT-licensed code from [Coder's ghostty-web](https://github.com/coder/ghostty-web) and from this repository's earlier life as a fork of it (that history is kept in branch `old-fork-main`, last at `a169a863599517272533b9c70789a09556a55b06`). It is maintained here as ordinary source; about half the browser layer's lines still match Coder's code, while the engine bridge and the WebGL renderer are new. History before the move to this repository comes from `ghostty-web/` in `kkrausse/random`. See [LICENSE](LICENSE).
 
 The official artifact's release asset ID, SHA-256, source revision, and license are retained under `vendor/`. The `tip` release URL is mutable: an upgrade must pin a new artifact and adapt/test the matching ABI together. Never replace the binary from `tip` automatically during installation.
 
@@ -92,12 +94,12 @@ bun test
 Run `bun run dev` and open `http://127.0.0.1:3108` for a minimal WebGL demo with
 Unicode/color samples, scrollback, resizing, and local keyboard/IME echo. It
 exposes `window.terminal` for inspecting engine state in the browser console.
-Use `bun-web-terminal` for real shell/tmux integration.
+Use a consuming app (bun-web-terminal) for real shell/tmux integration.
 
-Also run the consuming app's checks after bridge or input changes:
+Also run the consuming apps' checks after bridge or input changes, e.g. bun-web-terminal in `kkrausse/random`:
 
 ```sh
-cd ../bun-web-terminal
+cd random/bun-web-terminal
 bun install --frozen-lockfile
 bun run typecheck
 bun run test
