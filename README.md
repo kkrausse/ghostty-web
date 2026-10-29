@@ -8,7 +8,7 @@ The public API follows familiar terminal operations: `open`, `write`, `resize`, 
 
 ## Use
 
-Install from a tag: `bun add @random/ghostty-web@git+ssh://git@github.com/kkrausse/ghostty-web.git#v0.1.0`. Bun bundles the TypeScript directly. Serve `@random/ghostty-web/ghostty-vt.wasm` as `/ghostty-vt.wasm` alongside your application, with the `application/wasm` content type.
+Install from a tag: `bun add @random/ghostty-web@git+ssh://git@github.com/kkrausse/ghostty-web.git#v1.0.0`. Bun bundles the TypeScript directly. Serve `@random/ghostty-web/ghostty-vt.wasm` as `/ghostty-vt.wasm` alongside your application, with the `application/wasm` content type.
 
 ```ts
 import { init, Terminal } from "@random/ghostty-web";
